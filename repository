@@ -1,0 +1,104 @@
+What's a data repository pattern and why would I want one?
+At Black Pepper we have written a number of systems where a client application of some kind wants to load data and cache it on the client. It's a simple requirement that is used a great deal on all sorts of systems.
+We have implemented a repository pattern and an event driven system on amongst others a GWT app, an iPhone app, a C# desktop app and a javascript web app. They all share a the same repository pattern and are surprisingly similar in implementation.
+The repository pattern works a bit like this:
+The repository subscribes to events about the kind of data it is responsible for
+A view wants some data
+View fires an event on the event bus saying what data it wants
+The event bus delivers the event to the repository
+The repository looks in its cache to see if it has the data and if it is still valid according to some caching algorithm
+If the data isn't found in the client side cache then the repository passes the request onto the server side
+The server responds with the data and the repository puts it in the cache and then returns the data to the bits of the client that care about it. This can be done directly back to the client that requested it by calling the callback that could have been passed with the original request event. Or it could be published back onto the event bus where any bit of the client that is interested can get hold of it.
+The view receives the data and update the display.
+That is broadly how the pattern works, but there is various other details that I won't cover right now around how you know if your data is up to date and how you deal with refreshing it and removing it and so on.
+I'm going to show below how to implement this kind of pattern in Javascript and how to write it in such a way that you can unit test it.
+The javascript repository code
+First off, the repository code.
+companion.Repository = function(dataUrl, cacheKey, eventBus) {
+    this.dataUrl = dataUrl;
+
+    this.eventLoadDataKey = cacheKey + "/load";
+    this.eventBus = eventBus;
+    this.eventDataLoadedKey = cacheKey + "/loaded";
+        this.cacheTimeoutSeconds = 60;
+
+        if (dataUrl.indexOf('{0}') != -1) {
+        this.cacheKey = cacheKey + "_{0}";
+    } else {
+        this.cacheKey = cacheKey;
+    }
+
+    eventBus.subscribe(this.eventLoadDataKey, $.proxy(this.loadData, this));
+}
+
+
+
+
+Here we set up a simple constructor for our Repository class. It is injected with the URL where we'll load data from, the key under which we want to cache the data (essentially the type of data we are loading, for example, people or events or tweets) and finally the event bus. The event bus is also then used to get this repository to subscribe to events that want to load the kind of data this repository is responsible for. The {0} replacement stuff will become clear later.
+The loadData function is the core of the Repository class.
+companion.Repository.prototype.loadData = function(eventData, other) {
+
+    if (eventData) {
+        var dataSpecificCacheKey = this.cacheKey.replace('{0}',eventData);
+    }
+
+    if (supports_html5_storage) {
+        var cachedItem = localStorage.getItem(dataSpecificCacheKey);
+        if (cachedItem) {
+            cachedItem = JSON.parse(cachedItem)
+            var cacheTimeout = new Date(cachedItem.cacheDate);
+            cacheTimeout.setSeconds(cacheTimeout.getSeconds() + this.cacheTimeoutSeconds);
+            if (new Date() < cacheTimeout) {
+                console.log("Got data from cache as it hasn't timed out");
+                this.eventBus.publish(this.eventDataLoadedKey, [ cachedItem ] );
+                return;
+            } else {
+                console.log("Found data in cache, but it has timed out!")
+            }
+        } else {
+            console.log("Didn't find data in cache");
+        }
+    }
+
+    var thisDataUrl = this.dataUrl;
+    if (eventData) {
+        thisDataUrl = this.dataUrl.replace('{0}',eventData);
+    }
+
+    var dataCallback = function(data) {
+        console.log("Got data", dataSpecificCacheKey, thisDataUrl);
+        if (supports_html5_storage) {
+            data.cacheDate = new Date();
+            console.log("Stored data in cache at:" + data.cacheDate)
+               localStorage.setItem(dataSpecificCacheKey, JSON.stringify(data));
+        } else {
+            alert("Local storage not supported");
+        }
+        console.log('Publishing web service data to ', this.eventDataLoadedKey, data);
+        console.log('Event bus', this.eventBus);
+        this.eventBus.publish(this.eventDataLoadedKey, [ data ] );
+    }
+
+    var ajax = jQuery.getJSON(thisDataUrl, $.proxy(dataCallback, this));
+
+    ajax.error(function() {
+           console.log("Couldn't get data!! Get from cache instead")
+       });
+};
+
+
+
+
+
+
+
+When a request for data is published on the event bus the loadData function is called on the appropriate Repository and that then attempts to load the data from the cache for that specific key. So imagine you want to load the person with id=4 from your nice rest API /api/person/4.json then you'd setup your Repository like this:
+var personRepository = new companion.Repository("/api/person/{0}.json", "person", bus);
+This sets up a Repository that loads data from a parameterised URL and puts the results into the cache under the "person" key. Specifically, if you wanted to load person 4, it'd put it under the "person_4" key:
+bus.publish("person/load", [ 4 ]);
+Anywhere that you wanted to know about person data having been loaded, you'd just subscribe to the Repository's loaded event
+bus.subscribe("person/loaded", function(eventData, other) {
+ console.log("Got back data", eventData);
+});
+The clear advantage of the event bus is that you can have multiple parts of your client listening for changes to particular types of data rather than it just being bound as a one to one with who requested the data.
+Obviously you can do something more simple and just store all data in a repository under one key and look it up from a Javascript array or something like that, or you could go more complex I'm sure. Either way, the client requesting the data and receiving the data has no idea where that data has come from or how or if it was cached. It just requests some data and gets it back a bit later. You're then free to improve your Repository to your heart's content.
