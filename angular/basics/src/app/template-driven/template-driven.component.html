@@ -1,0 +1,18 @@
+<input type="text" #user value="content">
+<h3 [style.color] = 'color'>{{title}} </h3>
+<p >{{ 6 == 2*3}}</p>
+<button (click)='changeColor()'>Click</button>
+<input type="text" #testName [value] = 'username' (keyup) = 'updateUserDetails(testName.value)'>
+<div>{{username}}</div>
+
+<div>
+    <input type="text" user name=[value] = 'username' 
+        (keyup.enter) = 'updateUserDetails($event.target.value)'<br>
+        (blur) = 'changeInUserDetails($event.target.value)'
+    >
+    <input type="text" [(ngModel)] = 'username'>
+</div>
+<app-template-driven></app-template-driven>
+<select >
+    <option *ngFor= 'let colorVal of arr'>{{colorVal}}</option>
+</select><p>template-driven works!</p>
